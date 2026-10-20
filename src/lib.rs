@@ -2,6 +2,9 @@ use std::{ops::Range, path::Path};
 
 use hound::{SampleFormat, WavReader};
 
+mod topics;
+pub use topics::{sentence_windows, topic_paragraphs};
+
 /// Reads a WAV file into 32-bit float, 16KHz, mono samples as expected by whisper.
 pub fn load_audio(path: &Path) -> Vec<f32> {
     let mut reader = WavReader::open(path).expect("failed to open audio file");
