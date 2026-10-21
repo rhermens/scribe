@@ -1,19 +1,38 @@
-use std::{error::Error, fs::File, io::Write, num::NonZeroUsize, path::PathBuf};
+use std::{
+    error::Error,
+    fs::{self, File},
+    io::Write,
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+};
 
 use clap::Parser;
-use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
-use scribe::{Segment, load_audio, sentence_windows, topic_paragraphs};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use fastembed::{
+    EmbeddingModel, InitOptionsUserDefined, TextEmbedding, TokenizerFiles,
+    UserDefinedEmbeddingModel,
+};
+use scribe::{
+    audio::{Segment, load_audio},
+    download::download_models,
+    topics::{sentence_windows, topic_paragraphs},
+};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperError,
+    WhisperState,
+};
 
 #[derive(Debug, Parser)]
 struct Args {
-    #[arg(long)]
-    model: PathBuf,
+    #[arg(long, default_value = "transcript.md")]
+    output: PathBuf,
+
+    #[arg(long, default_value = "ggml-medium")]
+    whisper_model: String,
 
     #[arg(long)]
     audio: PathBuf,
 
-    #[arg(long)]
+    #[arg(long, default_value = "nl")]
     lang: String,
 
     /// Split at context similarity valleys below this value; higher values split more often.
@@ -35,30 +54,60 @@ fn parse_topic_threshold(value: &str) -> Result<f32, String> {
     Ok(threshold)
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
+fn load_embedding_model(dir: &Path) -> Result<TextEmbedding, Box<dyn Error>> {
+    let read = |file: &str| fs::read(dir.join(file));
+    let tokenizer_files = TokenizerFiles {
+        tokenizer_file: read("tokenizer.json")?,
+        config_file: read("config.json")?,
+        special_tokens_map_file: read("special_tokens_map.json")?,
+        tokenizer_config_file: read("tokenizer_config.json")?,
+    };
+    // Match the pooling and quantization TextEmbedding::try_new would pick.
+    let mut model = UserDefinedEmbeddingModel::new(read("onnx/model.onnx")?, tokenizer_files)
+        .with_quantization(TextEmbedding::get_quantization_mode(
+            &EmbeddingModel::ParaphraseMLMiniLML12V2,
+        ));
+    if let Some(pooling) =
+        TextEmbedding::get_default_pooling_method(&EmbeddingModel::ParaphraseMLMiniLML12V2)
+    {
+        model = model.with_pooling(pooling);
+    }
+    Ok(TextEmbedding::try_new_from_user_defined(
+        model,
+        InitOptionsUserDefined::new(),
+    )?)
+}
 
-    // load a context and model
-    let ctx = WhisperContext::new_with_params(args.model, WhisperContextParameters::default())
+fn load_whisper_model(
+    model_path: PathBuf,
+    lang: &'_ str,
+) -> Result<(WhisperState, FullParams<'_, '_>), WhisperError> {
+    let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
         .expect("failed to load model");
 
-    // create a params object
     let mut params = FullParams::new(SamplingStrategy::BeamSearch {
         beam_size: 5,
         patience: -1.0,
     });
-    params.set_language(Some(&args.lang));
+    params.set_language(Some(lang));
+    ctx.create_state().map(|x| (x, params))
+}
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
+
+    let (whisper_model_path, embedding_model_dir) = download_models(&args.whisper_model).await?;
+
+    let (mut whisper_state, params) = load_whisper_model(whisper_model_path, &args.lang)?;
     let audio_data = load_audio(&args.audio);
 
-    // now we can run the model
-    let mut state = ctx.create_state().expect("failed to create state");
-    state
+    whisper_state
         .full(params, &audio_data[..])
         .expect("failed to run model");
 
     // copy segments out of whisper's state so later stages don't borrow it
-    let segments: Vec<Segment> = state
+    let segments: Vec<Segment> = whisper_state
         .as_iter()
         .map(|s| Segment {
             id: s.segment_index() as usize,
@@ -69,14 +118,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .collect();
 
     let sentences = sentence_windows(&segments);
-    // Empty and single-sentence transcripts need neither a model download nor inference.
+    // Empty and single-sentence transcripts need no embedding inference.
     let paragraphs = if sentences.len() < 2 {
         sentences
     } else {
-        let mut model = TextEmbedding::try_new(
-            TextInitOptions::new(EmbeddingModel::ParaphraseMLMiniLML12V2)
-                .with_show_download_progress(true),
-        )?;
+        let mut model = load_embedding_model(&embedding_model_dir)?;
         let texts: Vec<&str> = sentences
             .iter()
             .map(|sentence| sentence.text.as_str())
@@ -91,7 +137,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // Finish segmentation before replacing the output file, so inference errors keep it intact.
-    let mut file = File::create("transcript.md")?;
+    let mut file = File::create(args.output)?;
     for paragraph in &paragraphs {
         let first = &segments[paragraph.segments.start];
         let last = &segments[paragraph.segments.end - 1];

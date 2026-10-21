@@ -1,4 +1,4 @@
-use crate::{Segment, Window};
+use crate::audio::{Segment, Window};
 
 /// Groups whole Whisper segments at sentence endings, or after roughly 60 words.
 /// Segment boundaries preserve timestamps; a segment containing several sentences stays intact.
