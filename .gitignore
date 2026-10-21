@@ -3,3 +3,5 @@
 /.devenv
 models/*
 /.fastembed_cache/
+test.wav
+transcript.md

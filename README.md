@@ -31,21 +31,19 @@ Tune both settings against your recordings. Topic boundaries remain embedding-ba
 
 The embedding model downloads on first use and is cached in `.fastembed_cache/`. Empty and single-group transcripts skip embedding inference.
 
-## CUDA transcription
+## GPU transcription
 
-The default Cargo feature enables CUDA for Whisper only. FastEmbed remains on the CPU. Whisper enables GPU use automatically when compiled with CUDA.
+Whisper's GPU backend depends on the target OS. Linux builds use CUDA, and macOS builds use Metal. FastEmbed remains on the CPU. Plain `cargo build` and `nix build` pick the right backend on both platforms.
+
+### CUDA (Linux)
 
 The Linux Nix shell supplies CUDA 13.2, cuBLAS, and a compatible host compiler. NVIDIA's CUDA packages require allowing unfree packages; the flake enables this locally. The build targets compute capability `89` for the RTX 4070 SUPER. Change `CMAKE_CUDA_ARCHITECTURES` in `flake.nix` for a different GPU.
 
-An installed NVIDIA driver is required at runtime. The shell exposes the NixOS driver libraries through `/run/opengl-driver/lib`. Run `direnv reload` after changing the flake, or re-enter `nix develop`.
+An installed NVIDIA driver is required at runtime. The shell exposes the NixOS driver libraries through `/run/opengl-driver/lib`. Run `direnv reload` after changing the flake, or re-enter `nix develop`. CUDA compilation can take substantially longer than Metal builds.
 
-For CPU-only transcription:
+### Metal (macOS)
 
-```sh
-cargo run --release --no-default-features -- --model models/ggml-medium.bin --audio recording.wav --lang nl
-```
-
-Nix package builds disable CUDA on macOS. Use `--no-default-features` for Cargo commands there. CUDA compilation can take substantially longer than CPU-only builds.
+Metal needs no extra setup. The Metal shaders are embedded in the binary.
 
 ## Checks
 

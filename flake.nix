@@ -38,7 +38,6 @@
           buildInputs = [ pkgs.openssl ] ++ pkgs.lib.optionals cudaEnabled (with cudaPackages; [
             cccl cuda_cudart cuda_culibos libcublas
           ]);
-          cargoExtraArgs = pkgs.lib.optionalString (!cudaEnabled) "--no-default-features";
         } // cudaBuildEnv;
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
