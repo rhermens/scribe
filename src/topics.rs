@@ -1,4 +1,7 @@
-use crate::audio::{Segment, Window};
+use crate::{
+    audio::{Segment, Window},
+    embedding::{cosine_similarity, l2_normalize},
+};
 
 /// Groups whole Whisper segments at sentence endings, or after roughly 60 words.
 /// Segment boundaries preserve timestamps; a segment containing several sentences stays intact.
@@ -63,27 +66,8 @@ pub fn topic_paragraphs(
     if groups.len() != embeddings.len() {
         return Err("expected one embedding per sentence window");
     }
-    let Some(first) = embeddings.first() else {
-        return Ok(Vec::new());
-    };
-    let dimensions = first.len();
-    let normalized: Vec<Vec<f32>> = embeddings
-        .iter()
-        .map(|embedding| {
-            if dimensions == 0 || embedding.len() != dimensions {
-                return Err("embeddings must have the same nonzero dimension");
-            }
-            let norm = embedding
-                .iter()
-                .map(|value| value * value)
-                .sum::<f32>()
-                .sqrt();
-            if !norm.is_finite() || norm == 0.0 {
-                return Err("embeddings must be finite and nonzero");
-            }
-            Ok(embedding.iter().map(|value| value / norm).collect())
-        })
-        .collect::<Result<_, _>>()?;
+
+    let normalized = l2_normalize(embeddings)?;
 
     if groups.len() == 1 {
         return Ok(vec![paragraph(groups)]);
@@ -93,7 +77,7 @@ pub fn topic_paragraphs(
     let context = 8.min(groups.len() / 2);
     let scores: Vec<f32> = (context..=groups.len() - context)
         .map(|index| {
-            context_similarity(
+            cosine_similarity(
                 &normalized[index - context..index],
                 &normalized[index..index + context],
             )
@@ -138,23 +122,6 @@ pub fn topic_paragraphs(
         .collect())
 }
 
-fn context_similarity(left: &[Vec<f32>], right: &[Vec<f32>]) -> f32 {
-    let sum = |context: &[Vec<f32>]| -> Vec<f32> {
-        (0..context[0].len())
-            .map(|dimension| context.iter().map(|embedding| embedding[dimension]).sum())
-            .collect()
-    };
-    let left = sum(left);
-    let right = sum(right);
-    let norm = (left.iter().map(|value| value * value).sum::<f32>()
-        * right.iter().map(|value| value * value).sum::<f32>())
-    .sqrt();
-    if norm == 0.0 {
-        return 0.0;
-    }
-    left.iter().zip(&right).map(|(a, b)| a * b).sum::<f32>() / norm
-}
-
 fn paragraph(groups: &[Window]) -> Window {
     Window {
         segments: groups[0].segments.start..groups[groups.len() - 1].segments.end,
@@ -168,6 +135,8 @@ fn paragraph(groups: &[Window]) -> Window {
 
 #[cfg(test)]
 mod tests {
+    use crate::embedding::cosine_similarity;
+
     use super::*;
 
     fn segments(texts: &[&str]) -> Vec<Segment> {
@@ -324,7 +293,7 @@ mod tests {
         );
 
         assert_eq!(
-            context_similarity(&[vec![1.0], vec![-1.0]], &[vec![1.0], vec![1.0]]),
+            cosine_similarity(&[vec![1.0], vec![-1.0]], &[vec![1.0], vec![1.0]]),
             0.0
         );
     }
