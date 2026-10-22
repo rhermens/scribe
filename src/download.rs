@@ -92,8 +92,8 @@ pub async fn download_models(
             .send(),
         laya_repo
             .snapshot_download()
-            .allow_patterns(EMBEDDING_FILES.map(String::from).to_vec())
-            .progress(DownloadBar::new(&bars, EMBEDDING_REPO.1)?)
+            .allow_patterns(LAYA_FILES.map(String::from).to_vec())
+            .progress(DownloadBar::new(&bars, LAYA_REPO.1)?)
             .send(),
     )?;
 
