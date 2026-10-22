@@ -17,6 +17,15 @@ const EMBEDDING_FILES: [&str; 5] = [
 
 const WHISPER_REPO: (&str, &str) = ("ggerganov", "whisper.cpp");
 
+const LAYA_REPO: (&str, &str) = ("convaiinnovations", "laya");
+const LAYA_FILES: [&str; 5] = [
+    "model.safetensors",
+    "encoder/config.json",
+    "tokenizer/tokenizer.json",
+    "tokenizer/tokenizer_config.json",
+    "rl_agent_config.json",
+];
+
 /// Sums per-file progress so one bar can follow a multi-file snapshot download.
 struct DownloadBar {
     bar: ProgressBar,
@@ -61,15 +70,16 @@ impl ProgressHandler for DownloadBar {
 
 pub async fn download_models(
     whisper_model: &str,
-) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
+) -> Result<(PathBuf, PathBuf, PathBuf), Box<dyn std::error::Error>> {
     let hf_client = HFClient::new()?;
 
     let bars = MultiProgress::new();
     let whisper_repo = hf_client.model(WHISPER_REPO.0, WHISPER_REPO.1);
     let embedding_repo = hf_client.model(EMBEDDING_REPO.0, EMBEDDING_REPO.1);
+    let laya_repo = hf_client.model(LAYA_REPO.0, LAYA_REPO.1);
 
     // Download both models in parallel before any local work starts.
-    let (whisper_model_path, embedding_model_dir) = tokio::try_join!(
+    let (whisper_model_path, embedding_model_dir, laya_model_dir) = tokio::try_join!(
         whisper_repo
             .download_file()
             .filename(format!("{}.bin", whisper_model))
@@ -80,7 +90,12 @@ pub async fn download_models(
             .allow_patterns(EMBEDDING_FILES.map(String::from).to_vec())
             .progress(DownloadBar::new(&bars, EMBEDDING_REPO.1)?)
             .send(),
+        laya_repo
+            .snapshot_download()
+            .allow_patterns(EMBEDDING_FILES.map(String::from).to_vec())
+            .progress(DownloadBar::new(&bars, EMBEDDING_REPO.1)?)
+            .send(),
     )?;
 
-    Ok((whisper_model_path, embedding_model_dir))
+    Ok((whisper_model_path, embedding_model_dir, laya_model_dir))
 }
