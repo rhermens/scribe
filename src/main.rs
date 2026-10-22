@@ -11,11 +11,13 @@ use fastembed::{
     EmbeddingModel, InitOptionsUserDefined, TextEmbedding, TokenizerFiles,
     UserDefinedEmbeddingModel,
 };
+use laya::{Agent, Question};
 use scribe::{
     audio::{Segment, load_audio},
     download::download_models,
     topics::{sentence_windows, topic_paragraphs},
 };
+use serde_json::json;
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperError,
     WhisperState,
@@ -34,6 +36,12 @@ struct Args {
 
     #[arg(long, default_value = "nl")]
     lang: String,
+
+    #[arg(long, default_value = "Which action is required?")]
+    prompt: String,
+
+    #[arg(long)]
+    options: Vec<String>,
 
     /// Split at context similarity valleys below this value; higher values split more often.
     #[arg(long, default_value_t = 0.6, value_parser = parse_topic_threshold, allow_hyphen_values = true)]
@@ -97,7 +105,8 @@ fn load_whisper_model(
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    let (whisper_model_path, embedding_model_dir) = download_models(&args.whisper_model).await?;
+    let (whisper_model_path, embedding_model_dir, laya_model_dir) =
+        download_models(&args.whisper_model).await?;
 
     let (mut whisper_state, params) = load_whisper_model(whisper_model_path, &args.lang)?;
     let audio_data = load_audio(&args.audio);
@@ -105,6 +114,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     whisper_state
         .full(params, &audio_data[..])
         .expect("failed to run model");
+
+    let laya_agent = Agent::from_dir(laya_model_dir, Default::default())?;
+    let laya_questions = vec![(
+        "action".to_owned(),
+        Question::choice(&args.prompt, &args.options),
+    )];
 
     // copy segments out of whisper's state so later stages don't borrow it
     let segments: Vec<Segment> = whisper_state
@@ -136,14 +151,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )?
     };
 
-    // Finish segmentation before replacing the output file, so inference errors keep it intact.
+    let actions = paragraphs
+        .iter()
+        .map(|paragraph| {
+            let response = laya_agent.system_one(&json!(paragraph.text), &laya_questions)?;
+            let action = response.answers["action"]["choice"]
+                .as_str()
+                .ok_or("laya returned no action choice")?
+                .to_owned();
+            Ok(action)
+        })
+        .collect::<Result<Vec<String>, Box<dyn Error>>>()?;
+
+    // Finish segmentation and classification before replacing the output file,
+    // so inference errors keep it intact.
     let mut file = File::create(args.output)?;
-    for paragraph in &paragraphs {
+    for (paragraph, action) in paragraphs.iter().zip(&actions) {
         let first = &segments[paragraph.segments.start];
         let last = &segments[paragraph.segments.end - 1];
         let markdown = format!(
-            "## [{} - {} cs] #{}-#{}\n\n{}\n",
-            first.start, last.end, first.id, last.id, paragraph.text,
+            "## [{} - {} cs] #{}-#{} {} ({})\n\n{}\n",
+            first.start, last.end, first.id, last.id, &args.prompt, action, paragraph.text,
         );
         println!("{markdown}");
         writeln!(file, "{markdown}")?;
