@@ -1,28 +1,15 @@
-use std::{
-    error::Error,
-    fs::{self, File},
-    io::Write,
-    num::NonZeroUsize,
-    path::{Path, PathBuf},
-};
+use std::{error::Error, fs::File, io::Write, num::NonZeroUsize, path::PathBuf};
 
 use clap::Parser;
-use fastembed::{
-    EmbeddingModel, InitOptionsUserDefined, TextEmbedding, TokenizerFiles,
-    UserDefinedEmbeddingModel,
-};
-use laya::{Agent, Question};
+use laya::Question;
 use scribe::{
     Segment,
     audio::load_audio,
     download::download_models,
+    model::{load_classification_model, load_embedding_model, load_transcript_model},
     topics::{sentence_windows, topic_paragraphs},
 };
 use serde_json::json;
-use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperError,
-    WhisperState,
-};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -63,45 +50,6 @@ fn parse_topic_threshold(value: &str) -> Result<f32, String> {
     Ok(threshold)
 }
 
-fn load_embedding_model(dir: &Path) -> Result<TextEmbedding, Box<dyn Error>> {
-    let read = |file: &str| fs::read(dir.join(file));
-    let tokenizer_files = TokenizerFiles {
-        tokenizer_file: read("tokenizer.json")?,
-        config_file: read("config.json")?,
-        special_tokens_map_file: read("special_tokens_map.json")?,
-        tokenizer_config_file: read("tokenizer_config.json")?,
-    };
-    // Match the pooling and quantization TextEmbedding::try_new would pick.
-    let mut model = UserDefinedEmbeddingModel::new(read("onnx/model.onnx")?, tokenizer_files)
-        .with_quantization(TextEmbedding::get_quantization_mode(
-            &EmbeddingModel::ParaphraseMLMiniLML12V2,
-        ));
-    if let Some(pooling) =
-        TextEmbedding::get_default_pooling_method(&EmbeddingModel::ParaphraseMLMiniLML12V2)
-    {
-        model = model.with_pooling(pooling);
-    }
-    Ok(TextEmbedding::try_new_from_user_defined(
-        model,
-        InitOptionsUserDefined::new(),
-    )?)
-}
-
-fn load_whisper_model(
-    model_path: PathBuf,
-    lang: &'_ str,
-) -> Result<(WhisperState, FullParams<'_, '_>), WhisperError> {
-    let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
-        .expect("failed to load model");
-
-    let mut params = FullParams::new(SamplingStrategy::BeamSearch {
-        beam_size: 5,
-        patience: -1.0,
-    });
-    params.set_language(Some(lang));
-    ctx.create_state().map(|x| (x, params))
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
@@ -109,14 +57,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (whisper_model_path, embedding_model_dir, laya_model_dir) =
         download_models(&args.whisper_model).await?;
 
-    let (mut whisper_state, params) = load_whisper_model(whisper_model_path, &args.lang)?;
+    let (mut whisper_state, params) = load_transcript_model(whisper_model_path, &args.lang)?;
     let audio_data = load_audio(&args.audio);
 
     whisper_state
         .full(params, &audio_data[..])
         .expect("failed to run model");
 
-    let laya_agent = Agent::from_dir(laya_model_dir, Default::default())?;
+    let laya_agent = load_classification_model(laya_model_dir)?;
     let laya_questions = vec![(
         "action".to_owned(),
         Question::choice(&args.prompt, &args.options),

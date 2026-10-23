@@ -3,6 +3,7 @@ use std::ops::Range;
 pub mod audio;
 pub mod download;
 pub mod embedding;
+pub mod model;
 pub mod topics;
 
 pub struct Segment {
