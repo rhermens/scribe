@@ -172,7 +172,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let last = &segments[paragraph.segments.end - 1];
         let markdown = format!(
             "## [{} - {} cs] #{}-#{} {} ({})\n\n{}\n",
-            first.start, last.end, first.id, last.id, &args.prompt, action, paragraph.text,
+            first.start, last.end, first.id, last.id, args.prompt, action, paragraph.text,
         );
         println!("{markdown}");
         writeln!(file, "{markdown}")?;
@@ -189,8 +189,8 @@ mod tests {
     fn topic_options_are_validated_before_transcription() {
         let args = Args::try_parse_from([
             "scribe",
-            "--model",
-            "model.bin",
+            "--whisper-model",
+            "ggml-medium",
             "--audio",
             "audio.wav",
             "--lang",
@@ -204,8 +204,8 @@ mod tests {
             assert!(
                 Args::try_parse_from([
                     "scribe",
-                    "--model",
-                    "model.bin",
+                    "--whisper-model",
+                    "ggml-medium",
                     "--audio",
                     "audio.wav",
                     "--lang",
@@ -219,8 +219,8 @@ mod tests {
         assert!(
             Args::try_parse_from([
                 "scribe",
-                "--model",
-                "model.bin",
+                "--whisper-model",
+                "ggml-medium",
                 "--audio",
                 "audio.wav",
                 "--lang",
@@ -232,8 +232,8 @@ mod tests {
         );
         let args = Args::try_parse_from([
             "scribe",
-            "--model",
-            "model.bin",
+            "--whisper-model",
+            "ggml-medium",
             "--audio",
             "audio.wav",
             "--lang",

@@ -61,11 +61,14 @@ pub fn topic_paragraphs(
     assert!(min_words > 0);
     assert_eq!(sentences.len(), embeddings.len());
 
+    let normalized = l2_normalize(embeddings);
+
+    if sentences.is_empty() {
+        return Vec::new();
+    }
     if sentences.len() == 1 {
         return vec![paragraph(sentences)];
     }
-
-    let normalized = l2_normalize(embeddings);
     // Full context on both sides avoids unreliable cuts near the transcript's ends.
     let context = 8.min(sentences.len() / 2);
     let similarity_scores: Vec<f32> = (context..=sentences.len() - context)
@@ -205,7 +208,7 @@ mod tests {
     fn empty_and_blank_transcripts_have_no_groups() {
         assert!(sentence_windows(&[]).is_empty());
         assert!(groups(&[" ", ""]).is_empty());
-        assert!(topic_paragraphs(&[], &[], 0.6, 1).unwrap().is_empty());
+        assert!(topic_paragraphs(&[], &[], 0.6, 1).is_empty());
     }
 
     #[test]
@@ -213,7 +216,7 @@ mod tests {
         let input = groups(&["Garden soil.", "What do you mean?", "Garden plants."]);
         let embeddings = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![1.0, 0.0]];
         assert_eq!(
-            ranges(&topic_paragraphs(&input, &embeddings, 0.6, 1).unwrap()),
+            ranges(&topic_paragraphs(&input, &embeddings, 0.6, 1)),
             vec![0..3]
         );
     }
@@ -232,7 +235,7 @@ mod tests {
             vec![0.0, 3.0],
             vec![0.0, 1.0],
         ];
-        let output = topic_paragraphs(&input, &embeddings, 0.6, 1).unwrap();
+        let output = topic_paragraphs(&input, &embeddings, 0.6, 1);
         assert_eq!(ranges(&output), vec![0..2, 2..4]);
         assert_eq!(output[0].text, "Garden plants. Garden soil.");
         assert_eq!(output[1].text, "Cooking pasta. Cooking sauce.");
@@ -252,7 +255,7 @@ mod tests {
                 embedding
             })
             .collect();
-        let output = topic_paragraphs(&input, &embeddings, 0.6, 1).unwrap();
+        let output = topic_paragraphs(&input, &embeddings, 0.6, 1);
         assert_eq!(ranges(&output), vec![0..16, 16..32]);
         assert_eq!(
             output
@@ -269,7 +272,7 @@ mod tests {
         let input = groups(&["One two.", "Three four.", "Five."]);
         let embeddings = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![-1.0, 0.0]];
         assert_eq!(
-            ranges(&topic_paragraphs(&input, &embeddings, 0.6, 4).unwrap()),
+            ranges(&topic_paragraphs(&input, &embeddings, 0.6, 4)),
             vec![0..3]
         );
     }
@@ -279,7 +282,7 @@ mod tests {
         let input = groups(&["First.", "Second.", "Third."]);
         let embeddings = vec![vec![1.0, 0.0], vec![0.8, 0.6], vec![0.28, 0.96]];
         assert_eq!(
-            ranges(&topic_paragraphs(&input, &embeddings, 0.7, 1).unwrap()),
+            ranges(&topic_paragraphs(&input, &embeddings, 0.7, 1)),
             vec![0..3]
         );
     }
@@ -288,24 +291,15 @@ mod tests {
     fn higher_threshold_splits_more_often() {
         let input = groups(&["First.", "Second."]);
         let embeddings = vec![vec![1.0, 0.0], vec![0.6, 0.8]];
-        assert_eq!(
-            topic_paragraphs(&input, &embeddings, 0.5, 1).unwrap().len(),
-            1
-        );
-        assert_eq!(
-            topic_paragraphs(&input, &embeddings, 0.7, 1).unwrap().len(),
-            2
-        );
+        assert_eq!(topic_paragraphs(&input, &embeddings, 0.5, 1).len(), 1);
+        assert_eq!(topic_paragraphs(&input, &embeddings, 0.7, 1).len(), 2);
     }
 
     #[test]
     fn equality_does_not_split_and_cancelling_contexts_are_defined() {
         let input = groups(&["First.", "Second."]);
         let embeddings = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
-        assert_eq!(
-            topic_paragraphs(&input, &embeddings, 0.0, 1).unwrap().len(),
-            1
-        );
+        assert_eq!(topic_paragraphs(&input, &embeddings, 0.0, 1).len(), 1);
 
         assert_eq!(
             cosine_similarity(&[vec![1.0], vec![-1.0]], &[vec![1.0], vec![1.0]]),
@@ -316,9 +310,20 @@ mod tests {
     #[test]
     fn one_sentence_and_trailing_blanks_preserve_range() {
         let input = groups(&["Only sentence.", ""]);
-        let output = topic_paragraphs(&input, &[vec![1.0]], 0.6, 40).unwrap();
+        let output = topic_paragraphs(&input, &[vec![1.0]], 0.6, 40);
         assert_eq!(ranges(&output), vec![0..2]);
         assert_eq!(output[0].text, "Only sentence.");
+    }
+
+    #[test]
+    fn one_sentence_rejects_invalid_embeddings() {
+        let input = groups(&["Only sentence."]);
+        for embedding in [vec![], vec![0.0], vec![f32::NAN], vec![f32::INFINITY]] {
+            assert!(
+                std::panic::catch_unwind(|| topic_paragraphs(&input, &[embedding], 0.6, 1))
+                    .is_err()
+            );
+        }
     }
 
     #[test]
@@ -332,12 +337,19 @@ mod tests {
             vec![vec![f32::NAN], vec![1.0]],
             vec![vec![f32::INFINITY], vec![1.0]],
         ] {
-            assert!(topic_paragraphs(&input, &embeddings, 0.6, 1).is_err());
+            assert!(
+                std::panic::catch_unwind(|| topic_paragraphs(&input, &embeddings, 0.6, 1)).is_err()
+            );
         }
         let embeddings = vec![vec![1.0], vec![1.0]];
         for threshold in [f32::NAN, f32::INFINITY, -1.1, 1.1] {
-            assert!(topic_paragraphs(&input, &embeddings, threshold, 1).is_err());
+            assert!(
+                std::panic::catch_unwind(|| topic_paragraphs(&input, &embeddings, threshold, 1))
+                    .is_err()
+            );
         }
-        assert!(topic_paragraphs(&input, &embeddings, 0.6, 0).is_err());
+        assert!(
+            std::panic::catch_unwind(|| topic_paragraphs(&input, &embeddings, 0.6, 0)).is_err()
+        );
     }
 }
