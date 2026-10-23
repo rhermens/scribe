@@ -80,7 +80,7 @@ pub fn topic_paragraphs(
         })
         .collect();
 
-    let valleys = valleys(similarity_scores, (context / 2).max(1), threshold);
+    let valleys = local_minima(similarity_scores, (context / 2).max(1), threshold);
     let boundaries = boundaries(sentences, &valleys, context, min_words);
 
     boundaries
@@ -114,7 +114,7 @@ fn boundaries(
     boundaries
 }
 
-fn valleys(similarity_scores: Vec<f32>, radius: usize, threshold: f32) -> Vec<usize> {
+fn local_minima(similarity_scores: Vec<f32>, radius: usize, threshold: f32) -> Vec<usize> {
     let mut candidates: Vec<usize> = (0..similarity_scores.len())
         .filter(|&index| {
             let score = similarity_scores[index];
