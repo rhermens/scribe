@@ -52,30 +52,23 @@ fn segment_text(segments: &[Segment]) -> String {
 /// `min_words`, unless the entire transcript is shorter. No split is forced by length.
 /// Embeddings must be finite, nonzero, equally sized, and aligned with `groups`.
 pub fn topic_paragraphs(
-    groups: &[Window],
+    sentences: &[Window],
     embeddings: &[Vec<f32>],
     threshold: f32,
     min_words: usize,
-) -> Result<Vec<Window>, &'static str> {
-    if !threshold.is_finite() || !(-1.0..=1.0).contains(&threshold) {
-        return Err("topic threshold must be between -1 and 1");
-    }
-    if min_words == 0 {
-        return Err("minimum paragraph word count must be positive");
-    }
-    if groups.len() != embeddings.len() {
-        return Err("expected one embedding per sentence window");
+) -> Vec<Window> {
+    assert!((-1.0..=1.0).contains(&threshold) && threshold.is_finite());
+    assert!(min_words > 0);
+    assert_eq!(sentences.len(), embeddings.len());
+
+    if sentences.len() == 1 {
+        return vec![paragraph(sentences)];
     }
 
-    let normalized = l2_normalize(embeddings)?;
-
-    if groups.len() == 1 {
-        return Ok(vec![paragraph(groups)]);
-    }
-
+    let normalized = l2_normalize(embeddings);
     // Full context on both sides avoids unreliable cuts near the transcript's ends.
-    let context = 8.min(groups.len() / 2);
-    let scores: Vec<f32> = (context..=groups.len() - context)
+    let context = 8.min(sentences.len() / 2);
+    let similarity_scores: Vec<f32> = (context..=sentences.len() - context)
         .map(|index| {
             cosine_similarity(
                 &normalized[index - context..index],
@@ -83,30 +76,29 @@ pub fn topic_paragraphs(
             )
         })
         .collect();
-    let radius = (context / 2).max(1);
-    let mut candidates: Vec<usize> = (0..scores.len())
-        .filter(|&index| {
-            let score = scores[index];
-            let left = &scores[index.saturating_sub(radius)..index];
-            let right = &scores[index + 1..(index + radius + 1).min(scores.len())];
-            let left_peak = left.iter().copied().fold(score, f32::max);
-            let right_peak = right.iter().copied().fold(score, f32::max);
-            // A flat run of low similarity is not evidence of a subject boundary.
-            let prominence = (left_peak + right_peak) / 2.0 - score;
-            score < threshold
-                && left.iter().all(|&neighbor| neighbor > score)
-                && right.iter().all(|&neighbor| neighbor >= score)
-                && (scores.len() == 1 || prominence >= 0.05)
-        })
-        .collect();
-    // Prefer the strongest subject boundary when nearby candidates compete.
-    candidates.sort_by(|&a, &b| scores[a].total_cmp(&scores[b]).then(a.cmp(&b)));
+
+    let valleys = valleys(similarity_scores, (context / 2).max(1), threshold);
+    let boundaries = boundaries(sentences, &valleys, context, min_words);
+
+    boundaries
+        .windows(2)
+        .map(|range| paragraph(&sentences[range[0]..range[1]]))
+        .collect()
+}
+
+fn boundaries(
+    sentences: &[Window],
+    valleys: &[usize],
+    context: usize,
+    min_words: usize,
+) -> Vec<usize> {
     let mut words = vec![0_usize];
-    for group in groups {
-        words.push(words.last().unwrap() + group.text.split_whitespace().count());
+    for sentence in sentences {
+        words.push(words.last().unwrap() + sentence.text.split_whitespace().count());
     }
-    let mut boundaries = vec![0, groups.len()];
-    for candidate in candidates {
+
+    let mut boundaries = vec![0, sentences.len()];
+    for candidate in valleys {
         let boundary = candidate + context;
         if boundaries
             .iter()
@@ -116,10 +108,33 @@ pub fn topic_paragraphs(
         }
     }
     boundaries.sort_unstable();
-    Ok(boundaries
-        .windows(2)
-        .map(|range| paragraph(&groups[range[0]..range[1]]))
-        .collect())
+    boundaries
+}
+
+fn valleys(similarity_scores: Vec<f32>, radius: usize, threshold: f32) -> Vec<usize> {
+    let mut candidates: Vec<usize> = (0..similarity_scores.len())
+        .filter(|&index| {
+            let score = similarity_scores[index];
+            let left = &similarity_scores[index.saturating_sub(radius)..index];
+            let right =
+                &similarity_scores[index + 1..(index + radius + 1).min(similarity_scores.len())];
+            let left_peak = left.iter().copied().fold(score, f32::max);
+            let right_peak = right.iter().copied().fold(score, f32::max);
+            // A flat run of low similarity is not evidence of a subject boundary.
+            let prominence = (left_peak + right_peak) / 2.0 - score;
+            score < threshold
+                && left.iter().all(|&neighbor| neighbor > score)
+                && right.iter().all(|&neighbor| neighbor >= score)
+                && (similarity_scores.len() == 1 || prominence >= 0.05)
+        })
+        .collect();
+    // Prefer the strongest subject boundary when nearby candidates compete.
+    candidates.sort_by(|&a, &b| {
+        similarity_scores[a]
+            .total_cmp(&similarity_scores[b])
+            .then(a.cmp(&b))
+    });
+    candidates
 }
 
 fn paragraph(groups: &[Window]) -> Window {

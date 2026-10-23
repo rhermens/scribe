@@ -149,7 +149,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             &embeddings,
             args.topic_threshold,
             args.min_paragraph_words.get(),
-        )?
+        )
     };
 
     let actions = paragraphs

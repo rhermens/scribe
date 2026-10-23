@@ -1,30 +1,27 @@
 pub type Embedding = Vec<f32>;
 
 /// Normalize magnitudes
-pub fn l2_normalize(embeddings: &[Embedding]) -> Result<Vec<Embedding>, &'static str> {
+pub fn l2_normalize(embeddings: &[Embedding]) -> Vec<Embedding> {
     let Some(first) = embeddings.first() else {
-        return Ok(Vec::new());
+        return Vec::new();
     };
     let dimensions = first.len();
-    let normalized: Vec<Vec<f32>> = embeddings
+    assert!(dimensions > 0);
+
+    embeddings
         .iter()
         .map(|embedding| {
-            if dimensions == 0 || embedding.len() != dimensions {
-                return Err("embeddings must have the same nonzero dimension");
-            }
+            assert!(embedding.len() == dimensions);
             let norm = embedding
                 .iter()
                 .map(|value| value * value)
                 .sum::<f32>()
                 .sqrt();
-            if !norm.is_finite() || norm == 0.0 {
-                return Err("embeddings must be finite and nonzero");
-            }
-            Ok(embedding.iter().map(|value| value / norm).collect())
-        })
-        .collect::<Result<_, _>>()?;
 
-    Ok(normalized)
+            assert!(norm.is_finite() && norm != 0.0);
+            embedding.iter().map(|value| value / norm).collect()
+        })
+        .collect()
 }
 
 // Sim
