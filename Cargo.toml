@@ -3,6 +3,11 @@ name = "scribe"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+cuda = ["whisper-rs/cuda", "laya/cuda", "fastembed/cuda"]
+metal = ["whisper-rs/metal", "laya/metal", "fastembed/metal"]
+
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 fastembed = "7.1.2"
@@ -13,12 +18,3 @@ tokio = { version = "1.54.0", features = ["full"] }
 whisper-rs = "0.16.0"
 laya = "0.1.1"
 serde_json = "1.0.154"
-
-# GPU backend follows the target OS: CUDA on Linux, Metal on macOS.
-[target.'cfg(target_os = "linux")'.dependencies]
-whisper-rs = { version = "0.16.0", features = ["cuda"] }
-laya = { version = "0.1.1", features = ["cuda"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.16.0", features = ["metal"] }
-laya = { version = "0.1.1", features = ["metal"] }

@@ -1,5 +1,5 @@
 use crate::{
-    audio::{Segment, Window},
+    Segment, Window,
     embedding::{cosine_similarity, l2_normalize},
 };
 

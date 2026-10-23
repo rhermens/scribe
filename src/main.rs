@@ -13,7 +13,8 @@ use fastembed::{
 };
 use laya::{Agent, Question};
 use scribe::{
-    audio::{Segment, load_audio},
+    Segment,
+    audio::load_audio,
     download::download_models,
     topics::{sentence_windows, topic_paragraphs},
 };

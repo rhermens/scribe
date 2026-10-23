@@ -3,7 +3,7 @@
 Transcribe a 16 kHz WAV file into topic-separated Markdown paragraphs:
 
 ```sh
-nix develop
+nix develop --impure
 cargo run --release -- --model models/ggml-medium.bin --audio recording.wav --lang nl
 ```
 
@@ -33,17 +33,43 @@ The embedding model downloads on first use and is cached in `.fastembed_cache/`.
 
 ## GPU transcription
 
-Whisper's GPU backend depends on the target OS. Linux builds use CUDA, and macOS builds use Metal. FastEmbed remains on the CPU. Plain `cargo build` and `nix build` pick the right backend on both platforms.
+GPU acceleration is opt-in through Cargo features. Plain `cargo build` and `nix build` use the CPU on every platform. FastEmbed remains on the CPU.
+
+`nix develop --impure` automatically selects the development toolchain:
+
+- Linux with an NVIDIA driver: CUDA. Detection checks `/run/opengl-driver/lib/libcuda.so` or `/proc/driver/nvidia/version`.
+- macOS: Metal.
+- Other systems: CPU.
+
+The existing `.envrc` enables host detection for direnv. Pure `nix develop` cannot inspect host driver paths and selects CPU on Linux. Use `nix develop .#cpu`, `.#cuda`, or `.#metal` to override detection.
+
+Shell selection supplies the toolchain only; it does not enable Cargo features.
+
+Select `--features cuda` or `--features metal` to enable the backend for Whisper and Laya:
+
+```sh
+cargo build --release --features cuda
+cargo build --release --features metal
+```
+
+Pass the same feature to `cargo run`, `cargo test`, and `cargo clippy` when using a GPU backend. Backend toolchain and hardware requirements still apply.
 
 ### CUDA (Linux)
 
-The Linux Nix shell supplies CUDA 13.2, cuBLAS, and a compatible host compiler. NVIDIA's CUDA packages require allowing unfree packages; the flake enables this locally. The build targets compute capability `89` for the RTX 4070 SUPER. Change `CMAKE_CUDA_ARCHITECTURES` in `flake.nix` for a different GPU.
+Use `nix develop --impure` to detect CUDA, or `nix develop .#cuda` to select it explicitly. Pass `--features cuda` to Cargo. Use `nix build .#cuda` for a CUDA-enabled package.
 
-An installed NVIDIA driver is required at runtime. The shell exposes the NixOS driver libraries through `/run/opengl-driver/lib`. Run `direnv reload` after changing the flake, or re-enter `nix develop`. CUDA compilation can take substantially longer than Metal builds.
+```sh
+nix develop --impure
+cargo run --release --features cuda -- --model models/ggml-medium.bin --audio recording.wav --lang nl
+```
+
+The CUDA Nix shell supplies CUDA 13.2, cuBLAS, and a compatible host compiler. NVIDIA's CUDA packages require allowing unfree packages; the flake enables this locally. The build targets compute capability `89` for the RTX 4070 SUPER. Change both `CMAKE_CUDA_ARCHITECTURES` and `CUDA_COMPUTE_CAP` in `flake.nix` for a different GPU.
+
+An installed NVIDIA driver is required at runtime. The shell exposes the NixOS driver libraries through `/run/opengl-driver/lib`. Re-enter the shell or run `direnv reload` after changing the flake. CUDA compilation can take substantially longer than Metal builds.
 
 ### Metal (macOS)
 
-Metal needs no extra setup. The Metal shaders are embedded in the binary.
+The default development shell selects Metal on macOS. Enable `--features metal` in Cargo, or use `nix build .#metal`. The Metal shaders are embedded in the binary.
 
 ## Checks
 

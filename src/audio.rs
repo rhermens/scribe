@@ -1,6 +1,8 @@
-use std::{ops::Range, path::Path};
+use std::path::Path;
 
 use hound::{SampleFormat, WavReader};
+
+use crate::{Segment, Window};
 
 /// Reads a WAV file into 32-bit float, 16KHz, mono samples as expected by whisper.
 pub fn load_audio(path: &Path) -> Vec<f32> {
@@ -29,20 +31,6 @@ pub fn load_audio(path: &Path) -> Vec<f32> {
         .chunks_exact(channels)
         .map(|frame| frame.iter().sum::<f32>() / channels as f32)
         .collect()
-}
-
-pub struct Segment {
-    pub id: usize,
-    /// Centiseconds, as returned by whisper.
-    pub start: i64,
-    pub end: i64,
-    pub text: String,
-}
-
-pub struct Window {
-    /// Indices into the segment slice.
-    pub segments: Range<usize>,
-    pub text: String,
 }
 
 /// Groups segments into overlapping windows of `size` centiseconds, advancing by `stride`.
